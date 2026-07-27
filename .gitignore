@@ -30,3 +30,19 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+.idea
+build/
+/local
+logs/
+/src/logs
+.VSCodeCounter/
+.history/
+.vscode/
+genm
+genm.json
+genm_bak.json
+tmp
+config/config.toml
+cli/logs
+.history
