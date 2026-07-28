@@ -1,7 +1,9 @@
 package main
 
 import (
+	"MiSwap/api/router"
 	"MiSwap/config"
+	"MiSwap/service/svc"
 	"flag"
 	"fmt"
 )
@@ -20,7 +22,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	//测验是否可以成功读取配置文件信息
-	fmt.Printf("%v+\n", c)
-	fmt.Printf("port%s", c.Api.Port)
+	_ = c
+	//	todo 服务上下文初始化。根据解析好的配置，创建服务上下文对象，包含数据库连接，缓存连接、日志记录等
+	serverCtx, err := svc.NewServiceContext(c)
+	if err != nil {
+		panic(err)
+	}
+	// TODO 初始化路由，添加上下文对象注入到路由
+	r := router.NewRouter(serverCtx)
+	
+	//启动
+	r.Run()
+
 }

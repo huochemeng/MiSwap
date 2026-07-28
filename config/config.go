@@ -1,6 +1,7 @@
 package config
 
 import (
+	"MiSwap/base/stores/gdb"
 	"github.com/spf13/viper"
 	"strings"
 )
@@ -17,8 +18,7 @@ type Api struct {
 type Config struct {
 	ProjectCfg *ProjectCfg `toml:"project_cfg" mapstructure:"project_cfg" json:"project_cfg"`
 	Api        `toml:"api" json:"api"`
-	//DB gdb.Config `toml:"db" json:"db"`
-
+	DB         gdb.Config `toml:"db" json:"db"`
 }
 
 func UnmarshalConfig(configFilePath string) (*Config, error) {
