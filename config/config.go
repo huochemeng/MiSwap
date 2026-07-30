@@ -15,10 +15,23 @@ type Api struct {
 	MaxNum int64  `toml:"max_num" json:"max_num"`
 }
 
+type Redis struct {
+	MasterName string `toml:"master_name" mapstructure:"master_name" json:"master_name"`
+	Host       string `toml:"host" json:"host"`
+	Type       string `toml:"type" json:"type"`
+	Pass       string `toml:"pass" json:"pass"`
+}
+
+type KvConf struct {
+	Redis []*Redis
+}
+
 type Config struct {
 	ProjectCfg *ProjectCfg `toml:"project_cfg" mapstructure:"project_cfg" json:"project_cfg"`
 	Api        `toml:"api" json:"api"`
 	DB         gdb.Config `toml:"db" json:"db"`
+	//	redis kv存储
+	Kv *KvConf `toml:"kv" json:"kv"`
 }
 
 func UnmarshalConfig(configFilePath string) (*Config, error) {
