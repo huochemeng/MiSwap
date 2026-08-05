@@ -61,3 +61,20 @@ func UserLoginHandler(ctx *svc.ServerCtx) gin.HandlerFunc {
 		xhttp.OkJson(c, dto.UserLoginResp{Result: res})
 	}
 }
+
+func GetSigStatusHandler(svcCtx *svc.ServerCtx) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userAddr := c.Params.ByName("address")
+		if userAddr == "" {
+			xhttp.Error(c, errcode.NewCustomErr("user address is null"))
+			return
+		}
+		//	数据库查询
+		res, err := service.GetSigStatusMsg(c.Request.Context(), svcCtx, userAddr)
+		if err != nil {
+			xhttp.Error(c, errcode.NewCustomErr(err.Error()))
+			return
+		}
+		xhttp.OkJson(c, res)
+	}
+}

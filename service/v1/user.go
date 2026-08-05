@@ -113,3 +113,11 @@ func UserLogin(ctx context.Context, svcCtx *svc.ServerCtx, req dto.LoginReq) (*d
 //	ciphertext := gcm.Seal(nonce, nonce, data, nil)
 //	return ciphertext, nil
 //}
+
+func GetSigStatusMsg(ctx context.Context, svcCtx *svc.ServerCtx, addr string) (*dto.UserSignStatusResp, error) {
+	isSigned, err := svcCtx.Dao.GetUserSigStatusMsg(ctx, addr)
+	if err != nil {
+		return nil, errcode.NewCustomErr("failed on get user sign status")
+	}
+	return &dto.UserSignStatusResp{IsSigned: isSigned}, nil
+}
