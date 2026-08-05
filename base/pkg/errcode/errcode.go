@@ -43,13 +43,14 @@ func (e *Err) Error() string {
 
 // 业务错误
 var (
-	NoErr               = NewErr(CodeOK, MsgOK)
-	ErrCustom           = NewErr(CodeCustom, MsgCustom)
-	ErrUnexpected       = NewErr(7777, "Network error, please try again later", http.StatusInternalServerError)
-	ErrTokenNotValidYet = NewErr(9999, "Token illegal", http.StatusUnauthorized)
-	ErrInvalidParams    = NewErr(10002, "Parameter is illegal")
-	ErrTokenVerify      = NewErr(10003, "Token check error", http.StatusUnauthorized)
-	ErrTokenExpire      = NewErr(10004, "Expired token", http.StatusUnauthorized)
+	NoErr                   = NewErr(CodeOK, MsgOK)
+	ErrCustom               = NewErr(CodeCustom, MsgCustom)
+	ErrUnexpected           = NewErr(7777, "Network error, please try again later", http.StatusInternalServerError)
+	ErrTokenNotValidYet     = NewErr(9999, "Token illegal", http.StatusUnauthorized)
+	ErrInvalidParams        = NewErr(10002, "Parameter is illegal")
+	ErrTokenVerify          = NewErr(10003, "Token check error", http.StatusUnauthorized)
+	ErrTokenExpire          = NewErr(10004, "Expired token", http.StatusUnauthorized)
+	ErrInvalidMessageFormat = NewErr(10005, "Invalid message format", http.StatusUnauthorized)
 )
 
 var codeToErr = map[uint32]*Err{
@@ -85,6 +86,11 @@ func SetCodeToErr(code uint32, err *Err) error {
 	return nil
 }
 
+// WithMsg 基于已有错误码创建携带动态消息的新实例
+func (e *Err) WithMsg(msg string) *Err {
+	return &Err{code: e.code, httpCode: e.httpCode, msg: msg}
+}
+
 // NewCustomErr 创建新的自定义错误
 func NewCustomErr(msg string, httpCode ...int) *Err {
 	return NewErr(CodeCustom, msg, httpCode...)
@@ -105,6 +111,17 @@ func ParseErr(err error) *Err {
 	if err == nil {
 		return NoErr
 	}
+
+	/*
+		 errors.Wrap 包裹后，错误类型变成了 *errors.withStack（pkg/errors 的内部类型），而这里的 ParseErr 函数只做了 err.(*Err) 的直接类型断言，
+		无法穿透 wrap 层识别出底层的业务错误。最终走到了 ParseCode 的兜底逻辑，返回了 ErrUnexpected (7777)
+	*/
+	// 新增：用 errors.As 穿透 wrap 层查找业务错误
+	var bizErr *Err
+	if errors.As(err, &bizErr) {
+		return bizErr
+	}
+
 	// 如果是业务类型结构，直接返回
 	if e, ok := err.(*Err); ok {
 		return e

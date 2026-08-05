@@ -6,6 +6,7 @@ import (
 	"MiSwap/service/svc"
 	"flag"
 	"fmt"
+	"log"
 )
 
 const defaultConfigPath = "./config/config.toml"
@@ -28,10 +29,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	// TODO 初始化路由，添加上下文对象注入到路由
 	r := router.NewRouter(serverCtx)
-	
+
 	//启动
-	r.Run()
+	err = r.Run()
+	if err != nil {
+		log.Fatalf("server start failed: %v", err)
+	}
 
 }

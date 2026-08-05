@@ -49,7 +49,7 @@ func NowAdd(d time.Duration, location ...*time.Location) time.Time {
 	return Now(location...).Add(d)
 }
 
-// Now returns now time.Time.
+// Now returns time.Time.
 func Now(location ...*time.Location) time.Time {
 	loc := getLocation(location...)
 	return time.Now().In(loc)

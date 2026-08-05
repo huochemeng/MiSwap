@@ -14,5 +14,7 @@ func loadV1(r *gin.Engine, svcCtx *svc.ServerCtx) {
 	user := apiV1.Group("/user")
 	//	生成登录的签名信息
 	user.GET("/:address/login-message", v1.GetLoginMessageHandler(svcCtx))
+	//  使用签名登录信息，获取token
+	user.POST("/login", v1.UserLoginHandler(svcCtx))
 
 }

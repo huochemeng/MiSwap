@@ -3,6 +3,7 @@ package v1
 import (
 	"MiSwap/base/pkg/errcode"
 	"MiSwap/base/pkg/xhttp"
+	"MiSwap/dto"
 	"MiSwap/service/svc"
 	"MiSwap/service/v1"
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,6 @@ func GetLoginMessageHandler(svcCtx *svc.ServerCtx) gin.HandlerFunc {
 			xhttp.Error(c, errcode.NewCustomErr("address is null"))
 			return
 		}
-		//	todo service层调用生成登录信息的方法
 		res, err := service.GetLoginMessage(c.Request.Context(), svcCtx, address)
 		if err != nil {
 			//c.JSON(http.StatusInternalServerError, gin.H{
@@ -36,5 +36,28 @@ func GetLoginMessageHandler(svcCtx *svc.ServerCtx) gin.HandlerFunc {
 		//		"Data":    res,
 		//	})
 		xhttp.OkJson(c, res)
+	}
+}
+
+func UserLoginHandler(ctx *svc.ServerCtx) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		//bodyBytes, _ := io.ReadAll(c.Request.Body)
+		//log.Printf("[DEBUG] Raw Body Length: %d", len(bodyBytes))
+		//log.Printf("[DEBUG] Raw Body Content: %s", string(bodyBytes))
+		//log.Printf("[DEBUG] Content-Type: %s", c.ContentType())
+		req := dto.LoginReq{}
+		if err := c.BindJSON(&req); err != nil {
+			xhttp.Error(c, err)
+			return
+		}
+		//todo	验证参数的格式是否有误
+
+		res, err := service.UserLogin(c.Request.Context(), ctx, req)
+		if err != nil {
+			xhttp.Error(c, err)
+			return
+		}
+
+		xhttp.OkJson(c, dto.UserLoginResp{Result: res})
 	}
 }
