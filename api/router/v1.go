@@ -20,4 +20,11 @@ func loadV1(r *gin.Engine, svcCtx *svc.ServerCtx) {
 		//获取用户签名状态
 		user.GET("/:address/sig-status", v1.GetSigStatusHandler(svcCtx))
 	}
+
+	//	collection区域
+	collection := apiV1.Group("/collection")
+	{
+		//	指定集合的address查询collection详情
+		collection.GET("/:address", v1.CollectionDetailHandler(svcCtx))
+	}
 }
