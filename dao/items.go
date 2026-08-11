@@ -7,9 +7,6 @@ import (
 	"fmt"
 )
 
-const OrderType = 1
-const OrderStatus = 0
-
 func (d *Dao) QueryListedAmount(ctx context.Context, chain string, addr string) (int64, error) {
 	// 1. 从Item表(ci)和订单表(co)联表查询
 	// 2. 关联条件:集合地址和tokenID都相同
@@ -30,8 +27,8 @@ func (d *Dao) QueryListedAmount(ctx context.Context, chain string, addr string) 
 	if err := d.DB.WithContext(ctx).Raw(
 		sql,
 		addr,
-		OrderType,
-		OrderStatus,
+		model.ListingOrder,
+		model.OrderStatusActive,
 		1,
 	).Scan(&counts).Error; err != nil {
 		return 0, errcode.NewCustomErr("item dao: failed to get listed item amount")

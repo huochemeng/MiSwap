@@ -98,3 +98,17 @@ func (d *Dao) GetTradeInfoByCollection(ctx context.Context, chain string, addr s
 	}, nil
 
 }
+
+// GetCollectionTurnover 获取指定collection的交易总额
+func (d *Dao) GetCollectionTurnover(chain string, addr string) (decimal.Decimal, error) {
+	var turnover decimal.Decimal
+	err := d.DB.WithContext(d.ctx).Table(model.ActivityTableName(chain)).
+		Where("collection_address = ? AND activity_type = ?", addr, model.Sale).
+		Select("COALESCE(SUM(price), 0)").
+		Row().Scan(&turnover)
+	if err != nil {
+		return decimal.Zero, errcode.NewCustomErr("failed to get collection total turnover")
+	}
+
+	return turnover, nil
+}

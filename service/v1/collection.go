@@ -1,6 +1,7 @@
 package service
 
 import (
+	"MiSwap/base/ordermanager"
 	"MiSwap/base/pkg/errcode"
 	"MiSwap/dto"
 	"MiSwap/service/svc"
@@ -26,30 +27,59 @@ func GetCollectionDetail(ctx context.Context, svcCtx *svc.ServerCtx, chain strin
 		volume24h = tradeInfo.Volume
 		turnover24h = tradeInfo.Turnover
 	}
-	//todo 查询上架数量
 	listed, err := svcCtx.Dao.QueryListedAmount(ctx, chain, addr)
 	if err != nil {
 		log.Printf("[warn] service: failed to get listed amount, err=%v", err)
 	} else {
-		//	todo 缓存上架数量
-
+		if err := svcCtx.Dao.CacheCollectionListed(ctx, chain, addr, int(listed)); err != nil {
+			log.Printf("[warn] service: failed to cache collection listed, err=%v", err)
+		}
 	}
-	_ = listed
-	//todo 查询地板价
-	//todo 查询卖单价格
-	//todo 如果地板价发生变化，更新价格时间
-	//todo 获取24小时交易量和销售量
-	//todo 查询总交易量
+	floorPrice, err := svcCtx.Dao.QueryFloorPrice(ctx, chain, addr)
+	if err != nil {
+		log.Printf("[warn] service: failed to get floorPrice, err=%v", err)
+	}
+	if !floorPrice.Equal(collection.FloorPrice) {
+		if err := ordermanager.AddUpdatePriceEvent(svcCtx.KvStore, &ordermanager.TradeEvent{
+			EventType:      ordermanager.UpdateCollection,
+			CollectionAddr: addr,
+			Price:          floorPrice,
+		}, chain); err != nil {
+			log.Printf("[warn] service: ")
+		}
+	}
+	var sellPrice string
+	collectionSell, err := svcCtx.Dao.QueryCollectionSellPrice(ctx, chain, addr)
+	if err != nil {
+		log.Printf("[warn] service: failed to get highest selling price")
+		sellPrice = "0"
+	} else {
+		sellPrice = collectionSell.SalePrice.String()
+	}
+
+	// 获取总的交易额
+	var turnoverTotal decimal.Decimal
+	collectionTurnover, err := svcCtx.Dao.GetCollectionTurnover(chain, addr)
+	if err != nil {
+		log.Printf("[warn] service: failed to get collection tatal turnover, err=%v", err)
+	} else {
+		turnoverTotal = collectionTurnover
+	}
 
 	//构建返回结果
 	detail := dto.CollectionDetail{
-		ImageUri:    collection.ImageUri,
-		Name:        collection.Name,
-		Address:     collection.Address,
-		ChainId:     collection.ChainId,
-		Volume24h:   volume24h,
-		Turnover24h: turnover24h,
-		//	其他数据，需要查询数据库
+		ImageUri:      collection.ImageUri,
+		Name:          collection.Name,
+		Address:       collection.Address,
+		ChainId:       collection.ChainId,
+		Volume24h:     volume24h,
+		Turnover24h:   turnover24h,
+		ListAmount:    listed,
+		FloorPrice:    floorPrice,
+		SellPrice:     sellPrice,
+		TotalSupply:   collection.ItemAmount,
+		OwnerAmount:   collection.OwnerAmount,
+		TurnoverTotal: turnoverTotal,
 	}
 	return &dto.CollectionDetailResp{
 		Result: detail,
