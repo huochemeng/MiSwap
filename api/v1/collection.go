@@ -3,8 +3,10 @@ package v1
 import (
 	"MiSwap/base/pkg/errcode"
 	"MiSwap/base/pkg/xhttp"
+	"MiSwap/dto"
 	"MiSwap/service/svc"
 	"MiSwap/service/v1"
+	"encoding/json"
 	"github.com/gin-gonic/gin"
 	"strconv"
 )
@@ -33,6 +35,119 @@ func CollectionDetailHandler(svcCtx *svc.ServerCtx) gin.HandlerFunc {
 		res, err := service.GetCollectionDetail(c.Request.Context(), svcCtx, chain, collectionAddr)
 		if err != nil {
 			xhttp.Error(c, errcode.NewCustomErr("handler: failed to get collection information"))
+			return
+		}
+		xhttp.OkJson(c, res)
+	}
+}
+
+func CollectionBidsHandler(svcCtx *svc.ServerCtx) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		filterParam := c.Query("filters")
+		if filterParam == "" {
+			xhttp.Error(c, errcode.NewCustomErr("Filter param is nil."))
+			return
+		}
+
+		var filter dto.CollectionBidFilterParams
+		err := json.Unmarshal([]byte(filterParam), &filter)
+		if err != nil {
+			xhttp.Error(c, errcode.NewCustomErr("Filter param is nil."))
+			return
+		}
+
+		collectionAddr := c.Params.ByName("address")
+		if collectionAddr == "" {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		chain, ok := chainIDToChain[int(filter.ChainID)]
+		if !ok {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		res, err := service.GetBids(c.Request.Context(), svcCtx, chain, collectionAddr, filter.Page, filter.PageSize)
+		if err != nil {
+			xhttp.Error(c, errcode.ErrUnexpected)
+			return
+		}
+		xhttp.OkJson(c, res)
+	}
+}
+
+func CollectionItemBidsHandler(ctx *svc.ServerCtx) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		filterParam := c.Query("filters")
+		if filterParam == "" {
+			xhttp.Error(c, errcode.NewCustomErr("Filter param is nil."))
+			return
+		}
+
+		var filter dto.CollectionBidFilterParams
+		err := json.Unmarshal([]byte(filterParam), &filter)
+		if err != nil {
+			xhttp.Error(c, errcode.NewCustomErr("Filter param is nil."))
+			return
+		}
+
+		collectionAddr := c.Params.ByName("address")
+		if collectionAddr == "" {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		tokenID := c.Params.ByName("token_id")
+		if tokenID == "" {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		chain, ok := chainIDToChain[int(filter.ChainID)]
+		if !ok {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		res, err := service.GetItemBidsInfo(c.Request.Context(), ctx, chain, collectionAddr, tokenID, filter.Page, filter.PageSize)
+		if err != nil {
+			xhttp.Error(c, errcode.ErrUnexpected)
+			return
+		}
+		xhttp.OkJson(c, res)
+	}
+}
+
+func CollectionItemsHandler(ctx *svc.ServerCtx) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		filterParam := c.Query("filters")
+		if filterParam == "" {
+			xhttp.Error(c, errcode.NewCustomErr("Filter param is nil."))
+			return
+		}
+
+		var filter dto.CollectionItemFilterParams
+		err := json.Unmarshal([]byte(filterParam), &filter)
+		if err != nil {
+			xhttp.Error(c, errcode.NewCustomErr("Filter param is nil."))
+			return
+		}
+
+		collectionAddr := c.Params.ByName("address")
+		if collectionAddr == "" {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		chain, ok := chainIDToChain[filter.ChainID]
+		if !ok {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+		res, err := service.GetItems(c.Request.Context(), ctx, chain, filter, collectionAddr)
+		if err != nil {
+			xhttp.Error(c, errcode.ErrUnexpected)
 			return
 		}
 		xhttp.OkJson(c, res)

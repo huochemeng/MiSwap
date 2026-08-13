@@ -6,6 +6,7 @@ import (
 	"MiSwap/dto"
 	"MiSwap/service/svc"
 	"context"
+	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"log"
 )
@@ -83,5 +84,48 @@ func GetCollectionDetail(ctx context.Context, svcCtx *svc.ServerCtx, chain strin
 	}
 	return &dto.CollectionDetailResp{
 		Result: detail,
+	}, nil
+}
+
+func GetBids(ctx context.Context, svcCtx *svc.ServerCtx, chain string, addr string, page int, size int) (*dto.CollectionBidsResp, error) {
+	bids, count, err := svcCtx.Dao.QueryCollectionBids(ctx, chain, addr, page, size)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get item info")
+	}
+
+	return &dto.CollectionBidsResp{
+		Result: bids,
+		Count:  count,
+	}, nil
+}
+
+func GetItemBidsInfo(ctx context.Context, ctx2 *svc.ServerCtx, chain string, addr string, tokenID string, page int, size int) (*dto.CollectionBidsResp, error) {
+	bids, count, err := ctx2.Dao.QueryItemBids(ctx, chain, addr, tokenID, page, size)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get item information")
+	}
+
+	for i := 0; i < len(bids); i++ {
+		bids[i].OrderType = getBidType(bids[i].OrderType)
+	}
+	return &dto.CollectionBidsResp{
+		Result: bids,
+		Count:  count,
+	}, nil
+}
+
+func GetItems(ctx context.Context, svcCtx *svc.ServerCtx, chain string, filter dto.CollectionItemFilterParams, addr string) (*dto.NFTListingInfoResp, error) {
+	// 1. 查询基础Item信息和订单信息
+	items, count, err := svcCtx.Dao.QueryCollectionItemOrder(ctx, chain, filter, addr)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get item info")
+	}
+
+	//todo 整理提取需要查询的itemID和所有者地址
+
+	//todo 并发查询各类扩展信息
+	return &dto.NFTListingInfoResp{
+		Result: items,
+		Count:  count,
 	}, nil
 }

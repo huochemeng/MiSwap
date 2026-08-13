@@ -26,5 +26,11 @@ func loadV1(r *gin.Engine, svcCtx *svc.ServerCtx) {
 	{
 		//	指定集合的address查询collection详情
 		collection.GET("/:address", v1.CollectionDetailHandler(svcCtx))
+		// 指定collection查询bids信息
+		collection.GET("/:address/bids", v1.CollectionBidsHandler(svcCtx))
+		// 指定item查询bids信息
+		collection.GET("/:address/:token_id/bids", v1.CollectionItemBidsHandler(svcCtx))
+		// 指定collection的items信息
+		collection.GET("/:address/items", v1.CollectionItemsHandler(svcCtx))
 	}
 }
