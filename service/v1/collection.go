@@ -3,12 +3,16 @@ package service
 import (
 	"MiSwap/base/ordermanager"
 	"MiSwap/base/pkg/errcode"
+	"MiSwap/base/stores/gdb/model"
 	"MiSwap/dto"
 	"MiSwap/service/svc"
 	"context"
+	"fmt"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"log"
+	"strings"
+	"sync"
 )
 
 func GetCollectionDetail(ctx context.Context, svcCtx *svc.ServerCtx, chain string, addr string) (*dto.CollectionDetailResp, error) {
@@ -121,11 +125,231 @@ func GetItems(ctx context.Context, svcCtx *svc.ServerCtx, chain string, filter d
 		return nil, errors.Wrap(err, "failed to get item info")
 	}
 
-	//todo 整理提取需要查询的itemID和所有者地址
+	// 整理提取需要查询的itemID和所有者地址
+	var ItemIds []string
+	var ItemOwners []string
+	var itemPrice []dto.ItemPriceInfo
+	for _, item := range items {
+		if item.TokenId != "" {
+			ItemIds = append(ItemIds, item.TokenId)
+		}
+		if item.Owner != "" {
+			ItemOwners = append(ItemOwners, item.Owner)
+		}
+		// 记录已上架Item的价格信息
+		if item.Listing {
+			itemPrice = append(itemPrice, dto.ItemPriceInfo{
+				CollectionAddress: item.CollectionAddress,
+				TokenID:           item.TokenId,
+				Maker:             item.Owner,
+				Price:             item.ListPrice,
+				OrderStatus:       model.OrderStatusActive,
+			})
+		}
+	}
 
-	//todo 并发查询各类扩展信息
+	// 3. 并发查询各类扩展信息
+	var queryErr error
+	var wg sync.WaitGroup
+
+	// 3.1 查询订单详情
+	ordersInfo := make(map[string]model.Order)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if len(itemPrice) > 0 {
+			orders, err := svcCtx.Dao.QueryListingInfo(ctx, chain, itemPrice)
+			if err != nil {
+				queryErr = errors.Wrap(err, "failed to get orders time info")
+				return
+			}
+			for _, order := range orders {
+				ordersInfo[strings.ToLower(order.CollectionAddress+order.TokenId)] = order
+			}
+		}
+	}()
+
+	// 3.2 查询Item图片信息
+	ItemsExternal := make(map[string]model.ItemExternal)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if len(ItemIds) != 0 {
+			items, err := svcCtx.Dao.QueryCollectionItemsImage(ctx, chain, addr, ItemIds)
+			if err != nil {
+				queryErr = errors.Wrap(err, "failed to get items image info")
+				return
+			}
+			for _, item := range items {
+				ItemsExternal[strings.ToLower(item.TokenId)] = item
+			}
+		}
+	}()
+
+	// 3.3 查询用户持有数量
+	userItemCount := make(map[string]int64)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if len(ItemIds) != 0 {
+			itemCount, err := svcCtx.Dao.QueryUsersItemCount(ctx, chain, addr, ItemOwners)
+			if err != nil {
+				queryErr = errors.Wrap(err, "failed to get items image info")
+				return
+			}
+			for _, v := range itemCount {
+				userItemCount[strings.ToLower(v.Owner)] = v.Counts
+			}
+		}
+	}()
+
+	// 3.4 查询最近成交价格
+	lastSales := make(map[string]decimal.Decimal)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if len(ItemIds) != 0 {
+			lastSale, err := svcCtx.Dao.QueryLastSalePrice(ctx, chain, addr, ItemIds)
+			if err != nil {
+				queryErr = errors.Wrap(err, "failed to get items last sale info")
+				return
+			}
+			for _, v := range lastSale {
+				lastSales[strings.ToLower(v.TokenId)] = v.Price
+			}
+		}
+	}()
+
+	// 3.5 查询Item级别最高出价
+	bestBids := make(map[string]model.Order)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if len(ItemIds) != 0 {
+			bids, err := svcCtx.Dao.QueryBestBids(ctx, chain, filter.UserAddress, addr, ItemIds)
+			if err != nil {
+				queryErr = errors.Wrap(err, "failed to get items last sale info")
+				return
+			}
+			for _, bid := range bids {
+				order, ok := bestBids[strings.ToLower(bid.TokenId)]
+				if !ok {
+					bestBids[strings.ToLower(bid.TokenId)] = bid
+					continue
+				}
+				if bid.Price.GreaterThan(order.Price) {
+					bestBids[strings.ToLower(bid.TokenId)] = bid
+				}
+			}
+		}
+	}()
+
+	// 3.6 查询集合级别最高出价
+	var collectionBestBid model.Order
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		collectionBestBid, err = svcCtx.Dao.QueryCollectionBestBid(ctx, chain, filter.UserAddress, addr)
+		if err != nil {
+			queryErr = errors.Wrap(err, "failed to get items last sale info")
+			return
+		}
+	}()
+
+	// 4. 等待所有查询完成
+	wg.Wait()
+	if queryErr != nil {
+		return nil, errors.Wrap(queryErr, "failed to get items info")
+	}
+
+	// 5. 整合所有信息
+	var respItems []*dto.NFTListingInfo
+	for _, item := range items {
+		// 设置Item名称
+		nameStr := item.Name
+		if nameStr == "" {
+			nameStr = fmt.Sprintf("#%s", item.TokenId)
+		}
+
+		// 构建返回结构
+		respItem := &dto.NFTListingInfo{
+			Name:              nameStr,
+			CollectionAddress: item.CollectionAddress,
+			TokenID:           item.TokenId,
+			OwnerAddress:      item.Owner,
+			ListPrice:         item.ListPrice,
+			MarketID:          item.MarketID,
+			BidOrderID:        collectionBestBid.OrderID,
+			BidExpireTime:     collectionBestBid.ExpireTime,
+			BidPrice:          collectionBestBid.Price,
+			BidTime:           collectionBestBid.EventTime,
+			BidSalt:           collectionBestBid.Salt,
+			BidMaker:          collectionBestBid.Maker,
+			BidType:           getBidType(collectionBestBid.OrderType),
+			BidSize:           collectionBestBid.Size,
+			BidUnfilled:       collectionBestBid.QuantityRemaining,
+		}
+
+		// 添加订单信息
+		listOrder, ok := ordersInfo[strings.ToLower(item.CollectionAddress+item.TokenId)]
+		if ok {
+			respItem.ListTime = listOrder.EventTime
+			respItem.ListOrderID = listOrder.OrderID
+			respItem.ListExpireTime = listOrder.ExpireTime
+			respItem.ListSalt = listOrder.Salt
+		}
+
+		// 添加最高出价信息
+		bidOrder, ok := bestBids[strings.ToLower(item.TokenId)]
+		if ok {
+			if bidOrder.Price.GreaterThan(collectionBestBid.Price) {
+				respItem.BidOrderID = bidOrder.OrderID
+				respItem.BidExpireTime = bidOrder.ExpireTime
+				respItem.BidPrice = bidOrder.Price
+				respItem.BidTime = bidOrder.EventTime
+				respItem.BidSalt = bidOrder.Salt
+				respItem.BidMaker = bidOrder.Maker
+				respItem.BidType = getBidType(bidOrder.OrderType)
+				respItem.BidSize = bidOrder.Size
+				respItem.BidUnfilled = bidOrder.QuantityRemaining
+			}
+		}
+
+		// 添加图片和视频信息
+		itemExternal, ok := ItemsExternal[strings.ToLower(item.TokenId)]
+		if ok {
+			if itemExternal.IsUploadedOss {
+				respItem.ImageURI = itemExternal.OssUri
+			} else {
+				respItem.ImageURI = itemExternal.ImageUri
+			}
+			if len(itemExternal.VideoUri) > 0 {
+				respItem.VideoType = itemExternal.VideoType
+				if itemExternal.IsVideoUploaded {
+					respItem.VideoURI = itemExternal.VideoOssUri
+				} else {
+					respItem.VideoURI = itemExternal.VideoUri
+				}
+			}
+		}
+
+		// 添加用户持有数量
+		count, ok := userItemCount[strings.ToLower(item.Owner)]
+		if ok {
+			respItem.OwnerOwnedAmount = count
+		}
+
+		// 添加最近成交价格
+		price, ok := lastSales[strings.ToLower(item.TokenId)]
+		if ok {
+			respItem.LastSellPrice = price
+		}
+
+		respItems = append(respItems, respItem)
+	}
+
 	return &dto.NFTListingInfoResp{
-		Result: items,
+		Result: respItems,
 		Count:  count,
 	}, nil
 }

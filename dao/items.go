@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"time"
 )
 
@@ -367,4 +368,222 @@ func (d *Dao) QueryCollectionItemOrder(ctx context.Context, chain string, filter
 	}
 
 	return items, count, nil
+}
+
+// QueryListingInfo 查询订单上架信息
+// 1. 根据传入的价格信息列表查询对应的订单详情
+// 2. 每个价格信息包含:集合地址、代币ID、创建者、订单状态和价格
+// 3. 返回订单的基本信息:集合地址、代币ID、订单ID、创建时间、过期时间等
+func (d *Dao) QueryListingInfo(ctx context.Context, chain string,
+	priceInfos []dto.ItemPriceInfo) ([]model.Order, error) {
+	// 构建查询条件
+	var conditions []clause.Expr
+	for _, price := range priceInfos {
+		conditions = append(conditions,
+			gorm.Expr("(?, ?, ?, ?, ?)",
+				price.CollectionAddress,
+				price.TokenID,
+				price.Maker,
+				price.OrderStatus,
+				price.Price))
+	}
+
+	var orders []model.Order
+	// SQL解释:
+	// 1. 从订单表中查询指定字段
+	// 2. WHERE条件使用IN子句,匹配多个(集合地址,代币ID,创建者,状态,价格)组合
+	// 3. 返回匹配的订单记录
+	if err := d.DB.WithContext(ctx).
+		Table(model.OrderTableName(chain)).
+		Select("collection_address,token_id,order_id,event_time,"+
+			"expire_time,salt,maker ").
+		Where("(collection_address,token_id,maker,order_status,price) in (?)",
+			conditions).
+		Scan(&orders).Error; err != nil {
+		return nil, errors.Wrap(err, "failed to query items order id")
+	}
+
+	return orders, nil
+}
+
+type UserItemCount struct {
+	Owner  string `json:"owner"`
+	Counts int64  `json:"counts"`
+}
+
+// QueryUsersItemCount 查询用户持有NFT数量统计
+// 1. 根据链名称、集合地址和用户地址列表查询每个用户持有的NFT数量
+// 2. 返回用户地址和对应的NFT持有数量
+func (d *Dao) QueryUsersItemCount(ctx context.Context, chain string,
+	collectionAddr string, owners []string) ([]UserItemCount, error) {
+
+	var itemCount []UserItemCount
+
+	// SQL解释:
+	// 1. 从Item表(ob_items_{chain})中查询
+	// 2. 选择owner字段和每个owner持有的NFT总数(COUNT(*))
+	// 3. 条件:指定集合地址且owner在给定列表中
+	// 4. 按owner分组统计每个用户的持有数量
+	if err := d.DB.WithContext(ctx).
+		Table(fmt.Sprintf("%s as ci", model.ItemTableName(chain))).
+		Select("owner,COUNT(*) AS counts").
+		Where("collection_address = ? and owner in (?)",
+			collectionAddr, owners).
+		Group("owner").
+		Scan(&itemCount).Error; err != nil {
+		return nil, errors.Wrap(err, "failed to get user item count")
+	}
+
+	return itemCount, nil
+}
+
+// QueryLastSalePrice 查询NFT最近的销售价格
+// 1. 根据链名称、集合地址和代币ID列表查询每个NFT最近一次的销售价格
+// 2. 返回NFT的集合地址、代币ID和对应的销售价格
+func (d *Dao) QueryLastSalePrice(ctx context.Context, chain string,
+	collectionAddr string, tokenIds []string) ([]model.Activity, error) {
+	var lastSales []model.Activity
+
+	// SQL解释:
+	// 1. 子查询:按集合地址和代币ID分组,找出每组最新的销售事件时间
+	//    - 条件:指定集合地址、代币ID列表、活动类型为销售
+	//    - 分组后取每组最大event_time
+	// 2. 主查询:关联活动表和子查询结果
+	//    - 匹配集合地址、代币ID、事件时间和活动类型
+	//    - 获取每个NFT最近一次销售的价格信息
+	sql := fmt.Sprintf(`
+		SELECT a.collection_address, a.token_id, a.price
+		FROM %s a
+		INNER JOIN (
+			SELECT collection_address,token_id, 
+				MAX(event_time) as max_event_time
+			FROM %s
+			WHERE collection_address = ?
+				AND token_id IN (?)
+				AND activity_type = ?
+			GROUP BY collection_address,token_id
+		) groupedA 
+		ON a.collection_address = groupedA.collection_address
+		AND a.token_id = groupedA.token_id
+		AND a.event_time = groupedA.max_event_time
+		AND a.activity_type = ?`,
+		model.ActivityTableName(chain),
+		model.ActivityTableName(chain))
+
+	if err := d.DB.Raw(sql, collectionAddr, tokenIds,
+		model.Sale, model.Sale).Scan(&lastSales).Error; err != nil {
+		return nil, errors.Wrap(err, "failed to get item last sale price")
+	}
+
+	return lastSales, nil
+}
+
+// QueryBestBids 查询NFT的最佳出价信息
+// 1. 根据链名称、用户地址、集合地址和代币ID列表查询NFT的出价信息
+// 2. 返回符合条件的出价订单列表
+// 3. 如果指定了用户地址,则排除该用户的出价
+func (d *Dao) QueryBestBids(ctx context.Context, chain string, userAddr string,
+	collectionAddr string, tokenIds []string) ([]model.Order, error) {
+	var bestBids []model.Order
+	var sql string
+
+	// SQL解释:
+	// 1. 查询订单表中符合条件的出价记录
+	// 2. 条件包括:
+	//    - 指定集合地址
+	//    - 指定代币ID列表
+	//    - 订单类型为出价单
+	//    - 订单状态为激活
+	//    - 未过期
+	//    - 剩余数量大于0
+	//    - 如果指定用户地址,则排除该用户的出价
+	if userAddr == "" {
+		sql = fmt.Sprintf(`
+			SELECT order_id, token_id, event_time, price, salt, 
+				expire_time, maker, order_type, quantity_remaining, size   
+			FROM %s
+			WHERE collection_address = ?
+				AND token_id IN (?)
+				AND order_type = ?
+				AND order_status = ?
+				AND expire_time > ?
+				AND quantity_remaining > 0
+		`, model.OrderTableName(chain))
+	} else {
+		sql = fmt.Sprintf(`
+			SELECT order_id, token_id, event_time, price, salt, 
+				expire_time, maker, order_type, quantity_remaining, size   
+			FROM %s
+			WHERE collection_address = ?
+				AND token_id IN (?)
+				AND order_type = ?
+				AND order_status = ?
+				AND expire_time > ?
+				AND quantity_remaining > 0
+				AND maker != '%s'
+		`, model.OrderTableName(chain), userAddr)
+	}
+
+	if err := d.DB.Raw(sql, collectionAddr, tokenIds,
+		model.ItemBidOrder, model.OrderStatusActive,
+		time.Now().Unix()).Scan(&bestBids).Error; err != nil {
+		return nil, errors.Wrap(err, "failed to get item best bids")
+	}
+
+	return bestBids, nil
+}
+
+// QueryCollectionBestBid 查询集合最高出价信息
+// 1. 根据链名称、用户地址和集合地址查询该集合的最高出价订单
+// 2. 如果指定了用户地址,则排除该用户的出价
+// 3. 返回价格最高的一个有效订单(未过期且有剩余数量)
+func (d *Dao) QueryCollectionBestBid(ctx context.Context, chain string,
+	userAddr string, collectionAddr string) (model.Order, error) {
+	var bestBid model.Order
+	var sql string
+
+	// SQL解释:
+	// 1. 从订单表中查询订单详细信息
+	// 2. 条件:
+	//   - 指定集合地址
+	//   - 订单类型为集合出价单
+	//   - 订单状态为活跃
+	//   - 剩余数量大于0
+	//   - 未过期
+	// 3. 按价格降序排序并限制返回1条记录
+	if userAddr == "" {
+		sql = fmt.Sprintf(`
+			SELECT order_id, price, event_time, expire_time, salt, maker, 
+				order_type, quantity_remaining, size  
+			FROM %s
+			WHERE collection_address = ?
+			AND order_type = ?
+			AND order_status = ?
+			AND quantity_remaining > 0
+			AND expire_time > ? 
+			ORDER BY price DESC 
+			LIMIT 1
+		`, model.OrderTableName(chain))
+	} else {
+		sql = fmt.Sprintf(`
+			SELECT order_id, price, event_time, expire_time, salt, maker, 
+				order_type, quantity_remaining, size  
+			FROM %s
+			WHERE collection_address = ?
+			AND order_type = ?
+			AND order_status = ?
+			AND quantity_remaining > 0
+			AND expire_time > ? 
+			AND maker != '%s'
+			ORDER BY price DESC 
+			LIMIT 1
+		`, model.OrderTableName(chain), userAddr)
+	}
+
+	if err := d.DB.Raw(sql, collectionAddr, model.CollectionBidOrder,
+		model.OrderStatusActive, time.Now().Unix()).Scan(&bestBid).Error; err != nil {
+		return bestBid, errors.Wrap(err, "failed to get item best bids")
+	}
+
+	return bestBid, nil
 }
