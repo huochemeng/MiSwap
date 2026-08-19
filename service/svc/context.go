@@ -13,8 +13,7 @@ import (
 )
 
 type ServerCtx struct {
-	DB *gorm.DB
-	//	todo redis,dao等
+	DB      *gorm.DB
 	Dao     *dao.Dao
 	KvStore *xkv.Store
 }

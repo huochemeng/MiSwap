@@ -587,3 +587,85 @@ func (d *Dao) QueryCollectionBestBid(ctx context.Context, chain string,
 
 	return bestBid, nil
 }
+
+// QueryItemInfo 查询单个NFT Item的详细信息
+func (d *Dao) QueryItemInfo(ctx context.Context, chain, collectionAddr, tokenID string) (*model.Item, error) {
+	var item model.Item
+
+	// 构建SQL查询
+	// 从items表中查询指定NFT的信息
+	err := d.DB.WithContext(ctx).
+		Table(model.ItemTableName(chain)).
+		Select("id, chain_id, collection_address, token_id, name, owner").
+		Where("collection_address =? and token_id = ? ",
+			collectionAddr, tokenID).
+		Scan(&item).Error
+
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query user items list info")
+	}
+
+	return &item, nil
+}
+
+// QueryItemListInfo 查询单个NFT的挂单信息
+// 主要功能:
+// 1. 查询NFT基本信息(ID、稀有度等)和挂单信息(价格、市场等)
+// 2. 如果有挂单,则查询挂单的详细信息(订单ID、过期时间等)
+func (d *Dao) QueryItemListInfo(ctx context.Context, chain, collectionAddr, tokenID string) (*CollectionItem, error) {
+	var collectionItem CollectionItem
+	db := d.DB.WithContext(ctx).Table(fmt.Sprintf("%s as ci", model.ItemTableName(chain)))
+	coTableName := model.OrderTableName(chain)
+
+	// SQL解释:
+	// 1. 从items表和orders表联表查询
+	// 2. 选择NFT基本信息和挂单信息
+	// 3. 按价格升序,取最低价的市场ID
+	// 4. 过滤条件:匹配NFT、活跃订单、owner是卖家
+	err := db.Select(
+		"ci.id as id, ci.chain_id as chain_id, "+
+			"ci.collection_address as collection_address,ci.token_id as token_id, "+
+			"ci.name as name, ci.owner as owner, "+
+			"min(co.price) as list_price, "+
+			"SUBSTRING_INDEX(GROUP_CONCAT(co.marketplace_id ORDER BY co.price,co.marketplace_id),',', 1) AS market_id, "+
+			"min(co.price) != 0 as listing").
+		Joins(fmt.Sprintf("join %s co on co.collection_address=ci.collection_address and co.token_id=ci.token_id",
+			coTableName)).
+		Where("ci.collection_address =? and ci.token_id = ? and co.order_type = ? and co.order_status=? "+
+			"and co.maker = ci.owner",
+			collectionAddr, tokenID, model.ListingOrder, model.OrderStatusActive).
+		Group("ci.collection_address,ci.token_id").
+		Scan(&collectionItem).Error
+
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query user items list info")
+	}
+
+	// 如果没有挂单,直接返回
+	if !collectionItem.Listing {
+		return &collectionItem, nil
+	}
+
+	// SQL解释:
+	// 如果有挂单,查询订单详细信息
+	// 1. 从orders表查询订单ID、过期时间等信息
+	// 2. 匹配NFT、卖家、状态和价格
+	var listOrder model.Order
+	if err := d.DB.WithContext(ctx).Table(fmt.Sprintf("%s as ci", model.OrderTableName(chain))).
+		Select("order_id, expire_time, maker, salt, event_time").
+		Where("collection_address=? and token_id=? and maker=? and order_status=? and price = ?",
+			collectionItem.CollectionAddress, collectionItem.TokenId,
+			collectionItem.Owner, model.OrderStatusActive, collectionItem.ListPrice).
+		Scan(&listOrder).Error; err != nil {
+		return nil, errors.Wrap(err, "failed to query item order id")
+	}
+
+	// 填充订单详细信息
+	collectionItem.OrderID = listOrder.OrderID
+	collectionItem.ListExpireTime = listOrder.ExpireTime
+	collectionItem.ListMaker = listOrder.Maker
+	collectionItem.ListSalt = listOrder.Salt
+	collectionItem.ListTime = listOrder.EventTime
+
+	return &collectionItem, nil
+}

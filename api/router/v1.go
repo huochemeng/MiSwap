@@ -1,6 +1,7 @@
 package router
 
 import (
+	"MiSwap/api/middleware"
 	v1 "MiSwap/api/v1"
 	"MiSwap/service/svc"
 	"github.com/gin-gonic/gin"
@@ -32,5 +33,14 @@ func loadV1(r *gin.Engine, svcCtx *svc.ServerCtx) {
 		collection.GET("/:address/:token_id/bids", v1.CollectionItemBidsHandler(svcCtx))
 		// 指定collection的items信息
 		collection.GET("/:address/items", v1.CollectionItemsHandler(svcCtx))
+		// 获取NFT Item的详细信息
+		collection.GET("/:address/:token_id", v1.ItemDetailHandler(svcCtx))
+		// 获取NFT Item的Attribute信息
+		collection.GET("/:address/:token_id/traits", v1.ItemTraitsHandler(svcCtx))
+		// 获取NFT Item的Trait的最高价格
+		collection.GET("/:address/top_trait", v1.ItemTopTraitPriceHandler(svcCtx))
+		// 获取NFT Item的图片信息
+		collection.GET("/:address/:token_id/image", middleware.CacheApi(svcCtx.KvStore, 60), v1.GetItemImageHandler(svcCtx))
+
 	}
 }

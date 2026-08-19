@@ -4,6 +4,7 @@ import (
 	"MiSwap/base/ordermanager"
 	"MiSwap/base/pkg/errcode"
 	"MiSwap/base/stores/gdb/model"
+	"MiSwap/dao"
 	"MiSwap/dto"
 	"MiSwap/service/svc"
 	"context"
@@ -351,5 +352,376 @@ func GetItems(ctx context.Context, svcCtx *svc.ServerCtx, chain string, filter d
 	return &dto.NFTListingInfoResp{
 		Result: respItems,
 		Count:  count,
+	}, nil
+}
+
+func GetItem(ctx context.Context, svcCtx *svc.ServerCtx, chain string, chainID int, addr string, tokenID string) (*dto.ItemDetailInfoResp, error) {
+	var queryErr error
+	var wg sync.WaitGroup
+
+	// 并发查询以下信息:
+	// 1. 查询collection信息
+	var collection *model.Collection
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		collection, queryErr = svcCtx.Dao.QueryCollectionInfo(ctx, chain, addr)
+		if queryErr != nil {
+			return
+		}
+	}()
+
+	// 2. 查询item基本信息
+	var item *model.Item
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		item, queryErr = svcCtx.Dao.QueryItemInfo(ctx, chain, addr, tokenID)
+		if queryErr != nil {
+			return
+		}
+	}()
+
+	// 3. 查询item挂单信息
+	var itemListInfo *dao.CollectionItem
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		itemListInfo, queryErr = svcCtx.Dao.QueryItemListInfo(ctx, chain, addr, tokenID)
+		if queryErr != nil {
+			return
+		}
+	}()
+
+	// 4. 查询item图片和视频信息
+	ItemExternals := make(map[string]model.ItemExternal)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		items, err := svcCtx.Dao.QueryCollectionItemsImage(ctx, chain, addr, []string{tokenID})
+		if err != nil {
+			queryErr = errors.Wrap(err, "failed to get items image info")
+			return
+		}
+
+		for _, item := range items {
+			ItemExternals[strings.ToLower(item.TokenId)] = item
+		}
+	}()
+
+	// 5. 查询最近成交价格
+	lastSales := make(map[string]decimal.Decimal)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		lastSale, err := svcCtx.Dao.QueryLastSalePrice(ctx, chain, addr, []string{tokenID})
+		if err != nil {
+			queryErr = errors.Wrap(err, "failed to get items last sale info")
+			return
+		}
+
+		for _, v := range lastSale {
+			lastSales[strings.ToLower(v.TokenId)] = v.Price
+		}
+	}()
+
+	// 6. 查询最高出价信息
+	bestBids := make(map[string]model.Order)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		bids, err := svcCtx.Dao.QueryBestBids(ctx, chain, "", addr, []string{tokenID})
+		if err != nil {
+			queryErr = errors.Wrap(err, "failed to get items last sale info")
+			return
+		}
+
+		for _, bid := range bids {
+			order, ok := bestBids[strings.ToLower(bid.TokenId)]
+			if !ok {
+				bestBids[strings.ToLower(bid.TokenId)] = bid
+				continue
+			}
+			if bid.Price.GreaterThan(order.Price) {
+				bestBids[strings.ToLower(bid.TokenId)] = bid
+			}
+		}
+	}()
+
+	// 7. 查询collection最高出价信息
+	var collectionBestBid model.Order
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		bid, err := svcCtx.Dao.QueryCollectionBestBid(ctx, chain, "", addr)
+		if err != nil {
+			queryErr = errors.Wrap(err, "failed to get items last sale info")
+			return
+		}
+		collectionBestBid = bid
+	}()
+
+	// 等待所有查询完成
+	wg.Wait()
+	if queryErr != nil {
+		return nil, errors.Wrap(queryErr, "failed to get items info")
+	}
+
+	// 组装返回数据
+	var itemDetail dto.ItemDetailInfo
+	itemDetail.ChainID = chainID
+
+	// 设置item基本信息
+	if item != nil {
+		itemDetail.Name = item.Name
+		itemDetail.CollectionAddress = item.CollectionAddress
+		itemDetail.TokenID = item.TokenId
+		itemDetail.OwnerAddress = item.Owner
+		// 设置collection级别的最高出价信息
+		itemDetail.BidOrderID = collectionBestBid.OrderID
+		itemDetail.BidExpireTime = collectionBestBid.ExpireTime
+		itemDetail.BidPrice = collectionBestBid.Price
+		itemDetail.BidTime = collectionBestBid.EventTime
+		itemDetail.BidSalt = collectionBestBid.Salt
+		itemDetail.BidMaker = collectionBestBid.Maker
+		itemDetail.BidType = getBidType(collectionBestBid.OrderType)
+		itemDetail.BidSize = collectionBestBid.Size
+		itemDetail.BidUnfilled = collectionBestBid.QuantityRemaining
+	}
+
+	// 如果item级别的最高出价大于collection级别的最高出价,则使用item级别的出价信息
+	bidOrder, ok := bestBids[strings.ToLower(item.TokenId)]
+	if ok {
+		if bidOrder.Price.GreaterThan(collectionBestBid.Price) {
+			itemDetail.BidOrderID = bidOrder.OrderID
+			itemDetail.BidExpireTime = bidOrder.ExpireTime
+			itemDetail.BidPrice = bidOrder.Price
+			itemDetail.BidTime = bidOrder.EventTime
+			itemDetail.BidSalt = bidOrder.Salt
+			itemDetail.BidMaker = bidOrder.Maker
+			itemDetail.BidType = getBidType(bidOrder.OrderType)
+			itemDetail.BidSize = bidOrder.Size
+			itemDetail.BidUnfilled = bidOrder.QuantityRemaining
+		}
+	}
+
+	// 设置挂单信息
+	if itemListInfo != nil {
+		itemDetail.ListPrice = itemListInfo.ListPrice
+		itemDetail.MarketplaceID = itemListInfo.MarketID
+		itemDetail.ListOrderID = itemListInfo.OrderID
+		itemDetail.ListTime = itemListInfo.ListTime
+		itemDetail.ListExpireTime = itemListInfo.ListExpireTime
+		itemDetail.ListSalt = itemListInfo.ListSalt
+		itemDetail.ListMaker = itemListInfo.ListMaker
+	}
+
+	// 设置collection信息
+	if collection != nil {
+		itemDetail.CollectionName = collection.Name
+		itemDetail.FloorPrice = collection.FloorPrice
+		itemDetail.CollectionImageURI = collection.ImageUri
+		if itemDetail.Name == "" {
+			itemDetail.Name = fmt.Sprintf("%s #%s", collection.Name, tokenID)
+		}
+	}
+
+	// 设置最近成交价格
+	price, ok := lastSales[strings.ToLower(tokenID)]
+	if ok {
+		itemDetail.LastSellPrice = price
+	}
+
+	// 设置图片和视频信息
+	itemExternal, ok := ItemExternals[strings.ToLower(tokenID)]
+	if ok {
+		itemDetail.ImageURI = itemExternal.ImageUri
+		if itemExternal.IsUploadedOss {
+			itemDetail.ImageURI = itemExternal.OssUri
+		}
+		if len(itemExternal.VideoUri) > 0 {
+			itemDetail.VideoType = itemExternal.VideoType
+			if itemExternal.IsVideoUploaded {
+				itemDetail.VideoURI = itemExternal.VideoOssUri
+			} else {
+				itemDetail.VideoURI = itemExternal.VideoUri
+			}
+		}
+	}
+
+	return &dto.ItemDetailInfoResp{
+		Result: itemDetail,
+	}, nil
+}
+
+func GetItemTraits(ctx context.Context, svcCtx *svc.ServerCtx, chain string, addr string, tokenID string) ([]dto.TraitInfo, error) {
+	var traitInfos []dto.TraitInfo
+	var itemTraits []model.ItemTrait
+	var collection *model.Collection
+	var traitCounts []dto.TraitCount
+	var queryErr error
+	var wg sync.WaitGroup
+
+	// 并发查询NFT Trait信息
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		itemTraits, queryErr = svcCtx.Dao.QueryItemTraits(
+			ctx,
+			chain,
+			addr,
+			tokenID,
+		)
+		if queryErr != nil {
+			return
+		}
+	}()
+
+	// 并发查询集合 Trait统计
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		traitCounts, queryErr = svcCtx.Dao.QueryCollectionTraits(
+			ctx,
+			chain,
+			addr,
+		)
+		if queryErr != nil {
+			return
+		}
+	}()
+
+	// 并发查询集合信息
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		collection, queryErr = svcCtx.Dao.QueryCollectionInfo(
+			ctx,
+			chain,
+			addr,
+		)
+		if queryErr != nil {
+			return
+		}
+	}()
+
+	// 等待所有查询完成
+	wg.Wait()
+	if queryErr != nil {
+		return nil, queryErr
+	}
+
+	// 如果NFT没有 Trait信息,返回空数组
+	if len(itemTraits) == 0 {
+		return traitInfos, nil
+	}
+
+	// 构建 Trait数量映射
+	traitCountMap := make(map[string]int64)
+	for _, trait := range traitCounts {
+		traitCountMap[fmt.Sprintf("%s-%s", trait.Trait, trait.TraitValue)] = trait.Count
+	}
+
+	// 计算每个 Trait的百分比并组装返回数据
+	for _, trait := range itemTraits {
+		key := fmt.Sprintf("%s-%s", trait.Trait, trait.TraitValue)
+		if count, ok := traitCountMap[key]; ok {
+			traitPercent := 0.0
+			if collection.ItemAmount != 0 {
+				traitPercent = decimal.NewFromInt(count).
+					DivRound(decimal.NewFromInt(collection.ItemAmount), 4).
+					Mul(decimal.NewFromInt(100)).
+					InexactFloat64()
+			}
+			traitInfos = append(traitInfos, dto.TraitInfo{
+				Trait:        trait.Trait,
+				TraitValue:   trait.TraitValue,
+				TraitAmount:  count,
+				TraitPercent: traitPercent,
+			})
+		}
+	}
+
+	return traitInfos, nil
+}
+
+func GetItemTopTraitPrice(ctx context.Context, svcCtx *svc.ServerCtx, chain string, addr string, tokenIDs []string) (*dto.ItemTopTraitResp, error) {
+	// 1. 查询Trait对应的最低挂单价格
+	traitsPrice, err := svcCtx.Dao.QueryTraitsPrice(ctx, chain, addr, tokenIDs)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed on calc top trait")
+	}
+
+	// 2. 空结果处理
+	if len(traitsPrice) == 0 {
+		return &dto.ItemTopTraitResp{
+			Result: []dto.TraitPrice{},
+		}, nil
+	}
+
+	// 3. 构建 Trait -> 最低挂单价格映射
+	traitsPrices := make(map[string]decimal.Decimal)
+	for _, traitPrice := range traitsPrice {
+		traitsPrices[strings.ToLower(fmt.Sprintf("%s:%s", traitPrice.Trait, traitPrice.TraitValue))] = traitPrice.Price
+	}
+
+	// 4. 查询指定 token ids的 所有Trait
+	traits, err := svcCtx.Dao.QueryItemsTraits(ctx, chain, addr, tokenIDs)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed on query items trait")
+	}
+
+	// 5. 计算指定 token ids的 最高价值 Trait
+	topTraits := make(map[string]dto.TraitPrice)
+	for _, trait := range traits {
+		key := strings.ToLower(fmt.Sprintf("%s:%s", trait.Trait, trait.TraitValue))
+		price, ok := traitsPrices[key]
+		if ok {
+			topPrice, ok := topTraits[trait.TokenId]
+			// 如果已有最高价且当前价格不高于最高价,跳过
+			if ok {
+				if price.LessThanOrEqual(topPrice.Price) {
+					continue
+				}
+			}
+
+			// 更新最高价值 Trait
+			topTraits[trait.TokenId] = dto.TraitPrice{
+				CollectionAddress: addr,
+				TokenID:           trait.TokenId,
+				Trait:             trait.Trait,
+				TraitValue:        trait.TraitValue,
+				Price:             price,
+			}
+		}
+	}
+
+	// 6. 整理返回结果
+	var results []dto.TraitPrice
+	for _, topTrait := range topTraits {
+		results = append(results, topTrait)
+	}
+
+	return &dto.ItemTopTraitResp{
+		Result: results,
+	}, nil
+}
+
+func GetItemImage(ctx context.Context, svcCtx *svc.ServerCtx, chain string, addr string, tokenID string) (*dto.ItemImage, error) {
+	items, err := svcCtx.Dao.QueryCollectionItemsImage(ctx, chain, addr, []string{tokenID})
+	if err != nil || len(items) == 0 {
+		return nil, errors.Wrap(err, "failed on get item image")
+	}
+	var imageUri string
+	if items[0].IsUploadedOss {
+		imageUri = items[0].OssUri // svcCtx.ImageMgr.GetSmallSizeImageUrl(items[0].OssUri)
+	} else {
+		imageUri = items[0].ImageUri // svcCtx.ImageMgr.GetSmallSizeImageUrl(items[0].ImageUri)
+	}
+
+	return &dto.ItemImage{
+		CollectionAddress: addr,
+		TokenID:           tokenID,
+		ImageUri:          imageUri,
 	}, nil
 }
