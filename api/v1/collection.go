@@ -299,3 +299,92 @@ func GetItemImageHandler(ctx *svc.ServerCtx) gin.HandlerFunc {
 		}{Result: result})
 	}
 }
+
+func HistorySalesHandler(ctx *svc.ServerCtx) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		collectionAddr := c.Params.ByName("address")
+		if collectionAddr == "" {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		chainID, err := strconv.ParseInt(c.Query("chain_id"), 10, 64)
+		if err != nil {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		chain, ok := chainIDToChain[int(chainID)]
+		if !ok {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		duration := c.Query("duration")
+		if duration != "" {
+			validParams := map[string]bool{
+				"24h": true,
+				"7d":  true,
+				"30d": true,
+			}
+			if ok := validParams[duration]; !ok {
+				xhttp.Error(c, errcode.ErrInvalidParams)
+				return
+			}
+		} else {
+			duration = "7d"
+		}
+
+		res, err := service.GetHistorySalesPrice(c.Request.Context(), ctx, chain, collectionAddr, duration)
+		if err != nil {
+			xhttp.Error(c, errcode.NewCustomErr("get history sales price error"))
+			return
+		}
+
+		xhttp.OkJson(c, struct {
+			Result interface{} `json:"result"`
+		}{
+			Result: res,
+		})
+	}
+}
+
+func ItemOwnerHandler(ctx *svc.ServerCtx) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		collectionAddr := c.Params.ByName("address")
+		if collectionAddr == "" {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		tokenID := c.Params.ByName("token_id")
+		if tokenID == "" {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		chainID, err := strconv.ParseInt(c.Query("chain_id"), 10, 64)
+		if err != nil {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		chain, ok := chainIDToChain[int(chainID)]
+		if !ok {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		owner, err := service.GetItemOwner(c.Request.Context(), ctx, chainID, chain, collectionAddr, tokenID)
+		if err != nil {
+			xhttp.Error(c, errcode.NewCustomErr("get item owner error"))
+			return
+		}
+
+		xhttp.OkJson(c, struct {
+			Result interface{} `json:"result"`
+		}{
+			Result: owner,
+		})
+	}
+}

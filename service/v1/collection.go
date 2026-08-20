@@ -1,6 +1,7 @@
 package service
 
 import (
+	"MiSwap/base/evm/eip"
 	"MiSwap/base/ordermanager"
 	"MiSwap/base/pkg/errcode"
 	"MiSwap/base/stores/gdb/model"
@@ -11,7 +12,9 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
+	"go.uber.org/zap"
 	"log"
+	"log/slog"
 	"strings"
 	"sync"
 )
@@ -723,5 +726,63 @@ func GetItemImage(ctx context.Context, svcCtx *svc.ServerCtx, chain string, addr
 		CollectionAddress: addr,
 		TokenID:           tokenID,
 		ImageUri:          imageUri,
+	}, nil
+}
+
+func GetHistorySalesPrice(ctx context.Context, svcCtx *svc.ServerCtx, chain string, addr string, duration string) ([]dto.HistorySalesPriceInfo, error) {
+	var durationTimeStamp int64
+	if duration == "24h" {
+		durationTimeStamp = 24 * 60 * 60
+	} else if duration == "7d" {
+		durationTimeStamp = 7 * 24 * 60 * 60
+	} else if duration == "30d" {
+		durationTimeStamp = 30 * 24 * 60 * 60
+	} else {
+		return nil, errors.New("only support 24h/7d/30d")
+	}
+
+	historySalesPriceInfo, err := svcCtx.Dao.QueryHistorySalesPriceInfo(ctx, chain, addr, durationTimeStamp)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get history sales price info")
+	}
+
+	res := make([]dto.HistorySalesPriceInfo, len(historySalesPriceInfo))
+
+	for i, ele := range historySalesPriceInfo {
+		res[i] = dto.HistorySalesPriceInfo{
+			Price:     ele.Price,
+			TokenID:   ele.TokenId,
+			TimeStamp: ele.EventTime,
+		}
+	}
+
+	return res, nil
+}
+
+func GetItemOwner(ctx context.Context, svcCtx *svc.ServerCtx, chainID int64, chain string, addr string, tokenID string) (*dto.ItemOwner, error) {
+	// 从链上获取NFT所有者地址
+	address, err := svcCtx.NodeSrvs[chainID].FetchNftOwner(addr, tokenID)
+	if err != nil {
+		log.Printf("failed to fetch nft owner onchain, err: %v", err)
+		return nil, errcode.ErrUnexpected
+	}
+
+	// 将地址转换为校验和格式
+	owner, err := eip.ToCheckSumAddress(address.String())
+	if err != nil {
+		slog.ErrorContext(ctx, "invalid address", "address", address.String(), "error", err)
+		return nil, errcode.ErrUnexpected
+	}
+
+	// 更新数据库中的所有者信息
+	if err := svcCtx.Dao.UpdateItemOwner(ctx, chain, collectionAddr, tokenID, owner); err != nil {
+		slog.ErrorContext(ctx, "failed to update item owner", "address", address.String(), "error", err)
+	}
+
+	// 返回NFT所有者信息
+	return &dto.ItemOwner{
+		CollectionAddress: addr,
+		TokenID:           tokenID,
+		Owner:             owner,
 	}, nil
 }

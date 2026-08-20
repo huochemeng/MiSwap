@@ -41,6 +41,10 @@ func loadV1(r *gin.Engine, svcCtx *svc.ServerCtx) {
 		collection.GET("/:address/top_trait", v1.ItemTopTraitPriceHandler(svcCtx))
 		// 获取NFT Item的图片信息
 		collection.GET("/:address/:token_id/image", middleware.CacheApi(svcCtx.KvStore, 60), v1.GetItemImageHandler(svcCtx))
+		// NFT销售历史价格信息
+		collection.GET("/:address/history_sales", v1.HistorySalesHandler(svcCtx))
+		// 获取NFT Item的owner信息
+		collection.GET("/:address/:token_id/owner", v1.ItemOwnerHandler(svcCtx))
 
 	}
 }

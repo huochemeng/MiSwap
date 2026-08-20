@@ -1,6 +1,7 @@
 package svc
 
 import (
+	"MiSwap/base/chain/nftchainservice"
 	"MiSwap/base/stores/gdb"
 	"MiSwap/base/stores/xkv"
 	"MiSwap/config"
@@ -13,9 +14,10 @@ import (
 )
 
 type ServerCtx struct {
-	DB      *gorm.DB
-	Dao     *dao.Dao
-	KvStore *xkv.Store
+	DB       *gorm.DB
+	Dao      *dao.Dao
+	KvStore  *xkv.Store
+	NodeSrvs map[int64]*nftchainservice.Service
 }
 
 func NewServiceContext(c *config.Config) (*ServerCtx, error) {

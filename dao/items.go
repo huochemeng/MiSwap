@@ -669,3 +669,12 @@ func (d *Dao) QueryItemListInfo(ctx context.Context, chain, collectionAddr, toke
 
 	return &collectionItem, nil
 }
+
+func (d *Dao) UpdateItemOwner(ctx context.Context, chain string, collectionAddr, tokenID string, owner string) error {
+	if err := d.DB.WithContext(ctx).Table(fmt.Sprintf("%s as ci", model.ItemTableName(chain))).
+		Where("collection_address = ? and token_id = ?", collectionAddr, tokenID).Update("owner", owner).
+		Error; err != nil {
+		return errors.Wrap(err, "failed to get user item count")
+	}
+	return nil
+}

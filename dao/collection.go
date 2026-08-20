@@ -79,8 +79,34 @@ func (d *Dao) QueryCollectionSellPrice(ctx context.Context, chain, collectionAdd
 		model.OrderStatusActive,
 		model.CollectionBidOrder,
 		time.Now().Unix()).Scan(&collection).Error; err != nil {
-		return nil, errors.Wrap(err, "failed on get collection sell price")
+		return nil, errors.Wrap(err, "failed to get collection sell price")
 	}
 
 	return &collection, nil
+}
+
+// QueryHistorySalesPriceInfo 查询指定时间段内的NFT销售历史价格信息
+func (d *Dao) QueryHistorySalesPriceInfo(ctx context.Context, chain string, addr string, stamp int64) ([]model.Activity, error) {
+	var historySalesInfo []model.Activity
+	now := time.Now().Unix()
+
+	// SQL语句解释:
+	// 1. 从activity表中查询指定字段(price,token_id,event_time)
+	// 2. 条件:
+	//   - 活动类型为Sale(销售)
+	//   - 集合地址匹配
+	//   - 事件时间在指定范围内(now-duration到now)
+	if err := d.DB.WithContext(ctx).
+		Table(model.ActivityTableName(chain)).
+		Select("price", "token_id", "event_time").
+		Where("activity_type = ? and collection_address = ? and event_time >= ? and event_time <= ?",
+			model.Sale,
+			addr,
+			now-stamp,
+			now).
+		Find(&historySalesInfo).Error; err != nil {
+		return nil, errors.Wrap(err, "failed to get history sales info")
+	}
+
+	return historySalesInfo, nil
 }
