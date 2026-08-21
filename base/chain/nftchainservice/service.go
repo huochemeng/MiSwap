@@ -46,12 +46,12 @@ func New(ctx context.Context, endpoint, chainName string, chainID int, nameTags,
 
 	nodeClient, err := chainclient.New(chainID, endpoint)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed on create node client")
+		return nil, errors.Wrap(err, "failed to create node client")
 	}
 
 	abi, err := NftContractMetaData.GetAbi()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed on get contract abi")
+		return nil, errors.Wrap(err, "failed to get contract abi")
 	}
 
 	return &Service{

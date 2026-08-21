@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"go.uber.org/zap"
 	"log"
 	"log/slog"
 	"strings"
@@ -775,7 +774,7 @@ func GetItemOwner(ctx context.Context, svcCtx *svc.ServerCtx, chainID int64, cha
 	}
 
 	// 更新数据库中的所有者信息
-	if err := svcCtx.Dao.UpdateItemOwner(ctx, chain, collectionAddr, tokenID, owner); err != nil {
+	if err := svcCtx.Dao.UpdateItemOwner(ctx, chain, addr, tokenID, owner); err != nil {
 		slog.ErrorContext(ctx, "failed to update item owner", "address", address.String(), "error", err)
 	}
 

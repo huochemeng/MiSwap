@@ -2,6 +2,7 @@ package svc
 
 import (
 	"MiSwap/base/chain/nftchainservice"
+	"MiSwap/base/pkg/errcode"
 	"MiSwap/base/stores/gdb"
 	"MiSwap/base/stores/xkv"
 	"MiSwap/config"
@@ -52,6 +53,18 @@ func NewServiceContext(c *config.Config) (*ServerCtx, error) {
 		dao:     d,
 		KvStore: store,
 	})
+
+	//添加nft服务环境
+	nodeSrvs := make(map[int64]*nftchainservice.Service)
+	for _, supported := range c.ChainSupported {
+		nodeSrvs[int64(supported.ChainID)], err = nftchainservice.New(context.Background(), supported.Endpoint, supported.Name, supported.ChainID,
+			c.MetadataParse.NameTags, c.MetadataParse.ImageTags, c.MetadataParse.AttributesTags,
+			c.MetadataParse.TraitNameTags, c.MetadataParse.TraitValueTags)
+
+		if err != nil {
+			return nil, errcode.NewCustomErr("failed to start on chain sync service")
+		}
+	}
 
 	//TODO 所有环境对象添加到serverCtx中（使用函数选项模式，将这些依赖以可选参数的方式添加，后续可优化的点,目前只是抽离成独立的结构体，并未使用函数选项模式）
 

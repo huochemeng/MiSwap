@@ -1,6 +1,7 @@
 package config
 
 import (
+	"MiSwap/base/evm/erc"
 	"MiSwap/base/stores/gdb"
 	"github.com/spf13/viper"
 	"strings"
@@ -26,12 +27,28 @@ type KvConf struct {
 	Redis []*Redis
 }
 
+type MetadataParse struct {
+	NameTags       []string `toml:"name_tags" mapstructure:"name_tags" json:"name_tags"`
+	ImageTags      []string `toml:"image_tags" mapstructure:"image_tags" json:"image_tags"`
+	AttributesTags []string `toml:"attributes_tags" mapstructure:"attributes_tags" json:"attributes_tags"`
+	TraitNameTags  []string `toml:"trait_name_tags" mapstructure:"trait_name_tags" json:"trait_name_tags"`
+	TraitValueTags []string `toml:"trait_value_tags" mapstructure:"trait_value_tags" json:"trait_value_tags"`
+}
+
+type ChainSupported struct {
+	Name     string `toml:"name" mapstructure:"name" json:"name"`
+	ChainID  int    `toml:"chain_id" mapstructure:"chain_id" json:"chain_id"`
+	Endpoint string `toml:"endpoint" mapstructure:"endpoint" json:"endpoint"`
+}
 type Config struct {
 	ProjectCfg *ProjectCfg `toml:"project_cfg" mapstructure:"project_cfg" json:"project_cfg"`
 	Api        `toml:"api" json:"api"`
 	DB         gdb.Config `toml:"db" json:"db"`
 	//	redis kv存储
-	Kv *KvConf `toml:"kv" json:"kv"`
+	Kv             *KvConf           `toml:"kv" json:"kv"`
+	Evm            *erc.NftErc       `toml:"evm" json:"evm"`
+	MetadataParse  *MetadataParse    `toml:"metadata_parse" mapstructure:"metadata_parse" json:"metadata_parse"`
+	ChainSupported []*ChainSupported `toml:"chain_supported" mapstructure:"chain_supported" json:"chain_supported"`
 }
 
 func UnmarshalConfig(configFilePath string) (*Config, error) {
