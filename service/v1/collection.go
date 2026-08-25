@@ -7,6 +7,7 @@ import (
 	"MiSwap/base/stores/gdb/model"
 	"MiSwap/dao"
 	"MiSwap/dto"
+	"MiSwap/service/mq"
 	"MiSwap/service/svc"
 	"context"
 	"fmt"
@@ -784,4 +785,13 @@ func GetItemOwner(ctx context.Context, svcCtx *svc.ServerCtx, chainID int64, cha
 		TokenID:           tokenID,
 		Owner:             owner,
 	}, nil
+}
+
+func RefreshItemMetadata(ctx context.Context, svcCtx *svc.ServerCtx, chain string, chainID int64, addr string, tokenID string) error {
+	if err := mq.AddSingleItemToRefreshMetadataQueue(svcCtx.KvStore, svcCtx.C.ProjectCfg.Name, chain, chainID, addr, tokenID); err != nil {
+		slog.ErrorContext(ctx, "failed to add item to refresh queue", "collection address", addr, "item_id", tokenID, "error", err)
+		return errcode.ErrUnexpected
+	}
+
+	return nil
 }

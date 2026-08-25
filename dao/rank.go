@@ -4,6 +4,7 @@ import (
 	"MiSwap/base/pkg/errcode"
 	"MiSwap/base/stores/gdb/model"
 	"context"
+	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"time"
 )
@@ -111,4 +112,88 @@ func (d *Dao) GetCollectionTurnover(chain string, addr string) (decimal.Decimal,
 	}
 
 	return turnover, nil
+}
+
+// GetCollectionRankingByActivity 根据Activity获取集合排行榜信息
+func (d *Dao) GetCollectionRankingByActivity(chain, period string) ([]*CollectionTrade, error) {
+	// 解析时间范围
+	// 获取时间段对应的epoch值
+	epoch, ok := periodToDuration[period]
+	if !ok {
+		return nil, errors.Errorf("invalid period: %s", period)
+	}
+	// 计算查询的时间范围
+	startTime := time.Now().Add(-time.Duration(epoch) * time.Minute)
+	endTime := time.Now()
+
+	// 计算上一个时间段
+	prevEndTime := startTime
+	prevStartTime := startTime.Add(-time.Duration(epoch) * time.Minute)
+
+	// 获取当前时间段的交易统计
+	type TradeStats struct {
+		CollectionAddress string
+		Volume            int64
+		Turnover          decimal.Decimal
+		FloorPrice        decimal.Decimal
+	}
+
+	var currentStats []TradeStats
+	err := d.DB.WithContext(d.ctx).Table(model.ActivityTableName(chain)).
+		Select("collection_address, COUNT(*) as item_count, COALESCE(SUM(price), 0) as volume, COALESCE(MIN(price), 0) as floor_price").
+		Where("activity_type = ? AND event_time >= ? AND event_time <= ?", model.Sale, startTime, endTime).
+		Group("collection_address").
+		Find(&currentStats).Error
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get current stats")
+	}
+
+	// 获取上一时间段的交易统计
+	var prevStats []TradeStats
+	err = d.DB.WithContext(d.ctx).Table(model.ActivityTableName(chain)).
+		Select("collection_address, COUNT(*) as item_count, COALESCE(SUM(price), 0) as volume, COALESCE(MIN(price), 0) as floor_price").
+		Where("activity_type = ? AND event_time >= ? AND event_time <= ?", model.Sale, prevStartTime, prevEndTime).
+		Group("collection_address").
+		Find(&prevStats).Error
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get previous stats")
+	}
+
+	// 构建上一时间段数据的map
+	prevStatsMap := make(map[string]TradeStats)
+	for _, stat := range prevStats {
+		prevStatsMap[stat.CollectionAddress] = stat
+	}
+
+	// 构建结果
+	var result []*CollectionTrade
+	for _, curr := range currentStats {
+		trade := &CollectionTrade{
+			ContractAddress: curr.CollectionAddress,
+			Volume:          curr.Volume,
+			Turnover:        curr.Turnover,
+			TurnoverChange:  0,
+			PreFloorPrice:   decimal.Zero,
+			FloorChange:     0,
+		}
+
+		// 计算变化率
+		if prev, ok := prevStatsMap[curr.CollectionAddress]; ok {
+			trade.PreFloorPrice = prev.FloorPrice
+
+			if !prev.Turnover.IsZero() {
+				volumeChangeDecimal := curr.Turnover.Sub(prev.Turnover).Div(prev.Turnover).Mul(decimal.NewFromInt(100))
+				trade.TurnoverChange = int(volumeChangeDecimal.IntPart())
+			}
+
+			if !prev.FloorPrice.IsZero() {
+				floorChangeDecimal := curr.FloorPrice.Sub(prev.FloorPrice).Div(prev.FloorPrice).Mul(decimal.NewFromInt(100))
+				trade.FloorChange = int(floorChangeDecimal.IntPart())
+			}
+		}
+
+		result = append(result, trade)
+	}
+
+	return result, nil
 }

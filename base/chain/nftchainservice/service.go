@@ -12,7 +12,7 @@ import (
 	"MiSwap/base/pkg/xhttp"
 )
 
-const defaultTimeout = 10 //uint s
+const defaultTimeout = 10 //uint sq
 
 type NodeService interface {
 	FetchOnChainMetadata(chainID int64, collectionAddr string, tokenID string) (*JsonMetadata, error)

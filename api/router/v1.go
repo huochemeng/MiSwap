@@ -45,6 +45,17 @@ func loadV1(r *gin.Engine, svcCtx *svc.ServerCtx) {
 		collection.GET("/:address/history_sales", v1.HistorySalesHandler(svcCtx))
 		// 获取NFT Item的owner信息
 		collection.GET("/:address/:token_id/owner", v1.ItemOwnerHandler(svcCtx))
-
+		// 刷新NFT Item的metadata
+		collection.GET("/:address/:token_id/metadata", v1.ItemMetadataRefreshHandler(svcCtx))
+		// 获取NFT集合排名情况
+		collection.GET("/ranking", middleware.CacheApi(svcCtx.KvStore, 60), v1.TopRankingHandler(svcCtx))
 	}
+
+	activities := apiV1.Group("/activities")
+	activities.GET("", v1.ActivityMultiChainHandler(svcCtx)) // 批量获取activity信息
+
+	//order区域
+	order := apiV1.Group("/bid-orders")
+	order.GET("", v1.OrderInfoHandler(svcCtx))
+
 }

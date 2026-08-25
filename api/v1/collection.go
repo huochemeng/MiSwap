@@ -388,3 +388,40 @@ func ItemOwnerHandler(ctx *svc.ServerCtx) gin.HandlerFunc {
 		})
 	}
 }
+
+func ItemMetadataRefreshHandler(ctx *svc.ServerCtx) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		chainId, err := strconv.ParseInt(c.Query("chain_id"), 10, 32)
+		if err != nil {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		chain, ok := chainIDToChain[int(chainId)]
+		if !ok {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		collectionAddr := c.Params.ByName("address")
+		if collectionAddr == "" {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		tokenId := c.Params.ByName("token_id")
+		if collectionAddr == "" {
+			xhttp.Error(c, errcode.ErrInvalidParams)
+			return
+		}
+
+		err = service.RefreshItemMetadata(c.Request.Context(), ctx, chain, chainId, collectionAddr, tokenId)
+		if err != nil {
+			xhttp.Error(c, err)
+			return
+		}
+
+		successStr := "Success to joined the refresh queue and waiting for refresh."
+		xhttp.OkJson(c, dto.CommonResp{Result: successStr})
+	}
+}

@@ -15,6 +15,7 @@ import (
 )
 
 type ServerCtx struct {
+	C        *config.Config
 	DB       *gorm.DB
 	Dao      *dao.Dao
 	KvStore  *xkv.Store

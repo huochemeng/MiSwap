@@ -94,8 +94,8 @@ type CollectionRankingInfo struct {
 	FloorPrice  string          `json:"floor_price"`
 	FloorChange string          `json:"floor_price_change"`
 	SellPrice   string          `json:"sell_price"`
-	Volume      decimal.Decimal `json:"volume"`
-	ItemNum     int64           `json:"item_num"`
+	Turnover    decimal.Decimal `json:"turnover"`
+	Volume      int64           `json:"volume"`
 	ItemOwner   int64           `json:"item_owner"`
 	ItemSold    int64           `json:"item_sold"`
 	ListAmount  int             `json:"list_amount"`

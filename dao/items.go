@@ -678,3 +678,130 @@ func (d *Dao) UpdateItemOwner(ctx context.Context, chain string, collectionAddr,
 	}
 	return nil
 }
+
+// QueryItemsBestBids
+// 1. 根据链名称、用户地址和Itemem信息列表查询ItemItem的最高出价订单
+// 2. 如果指定了用户地址,则排除该用户的出价
+// 3. 返回所有符合条件的有效订单(未过期且有剩余数量)
+func (d *Dao) QueryItemsBestBids(ctx context.Context, chain string, userAddr string, itemInfos []dto.ItemInfo) ([]model.Order, error) {
+	// 构建查询条件,将每个Item的集合地址和tokenID组合成(addr,tokenId)形式
+	var conditions []clause.Expr
+	for _, info := range itemInfos {
+		conditions = append(conditions, gorm.Expr("(?, ?)", info.CollectionAddress, info.TokenID))
+	}
+
+	var bestBids []model.Order
+	var sql string
+
+	// 根据是否指定用户地址构建不同的SQL
+	if userAddr == "" {
+		// SQL解释:
+		// 1. 从订单表中查询订单详细信息
+		// 2. WHERE条件:
+		//   - 集合地址和tokenID匹配输入的Item列表
+		//   - 订单类型为Item出价单
+		//   - 订单状态为活跃
+		//   - 剩余数量大于0
+		//   - 未过期
+		sql = fmt.Sprintf(`
+SELECT order_id, token_id, event_time, price, salt, expire_time, maker, order_type, quantity_remaining, size
+    FROM %s
+    WHERE (collection_address,token_id) IN (?)
+      AND order_type = ?
+      AND order_status = ?
+	  AND quantity_remaining > 0
+      AND expire_time > ?
+`, model.OrderTableName(chain))
+	} else {
+		// SQL解释:
+		// 与上面相同,但增加了排除指定用户的条件
+		sql = fmt.Sprintf(`
+SELECT order_id, token_id, event_time, price, salt, expire_time, maker, order_type, quantity_remaining,size 
+    FROM %s
+    WHERE (collection_address,token_id) IN (?)
+      AND order_type = ?
+      AND order_status = ?
+	  AND quantity_remaining > 0
+      AND expire_time > ?
+	  AND maker != '%s'
+`, model.OrderTableName(chain), userAddr)
+	}
+
+	// 执行SQL查询
+	if err := d.DB.Raw(sql, conditions, model.ItemBidOrder, model.OrderStatusActive, time.Now().Unix()).Scan(&bestBids).Error; err != nil {
+		return nil, errors.Wrap(err, "failed on get item best bids")
+	}
+
+	return bestBids, nil
+}
+
+// QueryCollectionTopNBid 查询集合中前N个最高出价订单
+// 主要功能:
+// 1. 查询指定集合中的最高出价订单
+// 2. 根据剩余数量展开订单
+// 3. 返回指定数量的订单记录
+func (d *Dao) QueryCollectionTopNBid(ctx context.Context, chain string,
+	userAddr string, collectionAddr string, num int) ([]model.Order, error) {
+	var bestBids []model.Order
+	var sql string
+
+	// 根据是否指定用户地址构建不同的SQL
+	if userAddr == "" {
+		// SQL解释:
+		// 1. 查询订单基本信息(订单ID、价格、时间、过期时间等)
+		// 2. 条件:
+		//   - 指定集合地址
+		//   - 订单类型为集合出价单
+		//   - 订单状态为活跃
+		//   - 剩余数量大于0
+		//   - 未过期
+		// 3. 按价格降序排序并限制返回记录数
+		sql = fmt.Sprintf(`
+			SELECT order_id, price, event_time, expire_time, salt, maker, 
+				order_type, quantity_remaining, size 
+			FROM %s
+			WHERE collection_address = ?
+				AND order_type = ?
+				AND order_status = ?
+				AND quantity_remaining > 0
+				AND expire_time > ? 
+			ORDER BY price DESC 
+			LIMIT %d
+		`, model.OrderTableName(chain), num)
+	} else {
+		// SQL与上面类似,增加了排除指定用户的条件(maker != userAddr)
+		sql = fmt.Sprintf(`
+			SELECT order_id, price, event_time, expire_time, salt, maker, 
+				order_type, quantity_remaining, size
+			FROM %s
+			WHERE collection_address = ?
+				AND order_type = ?
+				AND order_status = ?
+				AND quantity_remaining > 0
+				AND expire_time > ? 
+				AND maker != '%s'
+			ORDER BY price DESC 
+			LIMIT %d
+		`, model.OrderTableName(chain), userAddr, num)
+	}
+
+	// 执行SQL查询
+	if err := d.DB.Raw(sql, collectionAddr, model.CollectionBidOrder,
+		model.OrderStatusActive, time.Now().Unix()).Scan(&bestBids).Error; err != nil {
+		return nil, errors.Wrap(err, "failed on get item best bids")
+	}
+
+	// 根据剩余数量展开订单
+	var results []model.Order
+	for i := 0; i < len(bestBids); i++ {
+		for j := 0; j < int(bestBids[i].QuantityRemaining); j++ {
+			results = append(results, bestBids[i])
+		}
+	}
+
+	// 返回指定数量的订单
+	if num > len(results) {
+		return results[:], nil
+	}
+	return results[:num], nil
+}
