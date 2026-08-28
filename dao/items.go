@@ -38,6 +38,16 @@ type CollectionItem struct {
 	ListSalt       int64  `json:"list_salt"`
 }
 
+type MultiChainItemInfo struct {
+	dto.ItemInfo
+	ChainName string
+}
+
+type MultiChainItemPriceInfo struct {
+	dto.ItemPriceInfo
+	ChainName string
+}
+
 func (d *Dao) QueryListedAmount(ctx context.Context, chain string, addr string) (int64, error) {
 	// 1. 从Item表(ci)和订单表(co)联表查询
 	// 2. 关联条件:集合地址和tokenID都相同

@@ -51,6 +51,19 @@ func loadV1(r *gin.Engine, svcCtx *svc.ServerCtx) {
 		collection.GET("/ranking", middleware.CacheApi(svcCtx.KvStore, 60), v1.TopRankingHandler(svcCtx))
 	}
 
+	//资产区域
+	portfolio := apiV1.Group("/portfolio")
+	{
+		// 获取用户在多个链上拥有Collection信息
+		portfolio.GET("/collections", v1.UserMultiChainCollectionHandler(svcCtx))
+		// 查询用户拥有nft的Item基本信息
+		portfolio.GET("/items", v1.UserMultiChainItemsHandler(svcCtx))
+		// 查询用户挂单的Listing信息
+		portfolio.GET("/listings", v1.UserMultiChainListingsHandler(svcCtx))
+		// 查询用户挂单的Bids信息
+		portfolio.GET("/bids", v1.UserMultiChainBidsHandler(svcCtx))
+	}
+
 	activities := apiV1.Group("/activities")
 	activities.GET("", v1.ActivityMultiChainHandler(svcCtx)) // 批量获取activity信息
 
